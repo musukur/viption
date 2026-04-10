@@ -135,13 +135,23 @@ function validateRenderRequest(body) {
 function applyStyleToAss(assContent, style = {}) {
   const newStyleLine = buildStyleLine(style);
 
-  const updated = assContent.replace(/^Style:\s*Default,.*$/m, newStyleLine);
+  // normalize line endings first
+  const normalized = assContent.replace(/\r\n/g, "\n");
 
-  if (updated === assContent) {
-    throw new Error("Could not replace ASS style line");
+  // try replacing any Style: Default line
+  if (/^Style:\s*Default,/m.test(normalized)) {
+    return normalized.replace(/^Style:\s*Default,.*$/m, newStyleLine);
   }
 
-  return updated;
+  // fallback: insert style line after the V4+ Styles format line
+  if (/^\[V4\+ Styles\]$/m.test(normalized)) {
+    return normalized.replace(
+      /(\[V4\+ Styles\]\nFormat:.*\n)/m,
+      `$1${newStyleLine}\n`
+    );
+  }
+
+  throw new Error("Could not find ASS style section");
 }
 
 app.get("/health", async (_req, res) => {
