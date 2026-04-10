@@ -57,6 +57,93 @@ async function downloadFile(url, outputPath) {
   });
 }
 
+function mapPosition(position) {
+  switch (position) {
+    case "top":
+      return 8;
+    case "center":
+      return 5;
+    case "bottom":
+    default:
+      return 2;
+  }
+}
+
+function hexToAssColor(hex) {
+  const clean = (hex || "#FFFFFF").replace("#", "");
+  if (!/^[0-9A-Fa-f]{6}$/.test(clean)) {
+    throw new Error(`Invalid color value: ${hex}`);
+  }
+
+  const r = clean.substring(0, 2);
+  const g = clean.substring(2, 4);
+  const b = clean.substring(4, 6);
+
+  return `&H00${b}${g}${r}`.toUpperCase();
+}
+
+function buildStyleLine(inputStyle = {}) {
+  const style = {
+    font: "Arial",
+    fontSize: 32,
+    bold: true,
+    textColor: "#FFFFFF",
+    outlineColor: "#000000",
+    outlineWidth: 4,
+    shadow: 2,
+    position: "bottom",
+    marginBottom: 160,
+    ...inputStyle
+  };
+
+  const primaryColour = hexToAssColor(style.textColor);
+  const outlineColour = hexToAssColor(style.outlineColor);
+  const boldValue = style.bold ? -1 : 0;
+  const alignment = mapPosition(style.position);
+
+  return `Style: Default,${style.font},${style.fontSize},${primaryColour},&H0000FFFF,${outlineColour},&H64000000,${boldValue},0,0,0,100,100,0,0,1,${style.outlineWidth},${style.shadow},${alignment},40,40,${style.marginBottom},1`;
+}
+
+function validateRenderRequest(body) {
+  const { videoUrl, assContent, style } = body;
+
+  if (!videoUrl || typeof videoUrl !== "string") {
+    throw new Error("videoUrl is required and must be a string");
+  }
+
+  if (!assContent || typeof assContent !== "string") {
+    throw new Error("assContent is required and must be a string");
+  }
+
+  if (!assContent.includes("Style: Default,")) {
+    throw new Error("assContent must contain 'Style: Default,'");
+  }
+
+  if (!assContent.includes("[Events]")) {
+    throw new Error("assContent must contain '[Events]'");
+  }
+
+  if (style !== undefined && (typeof style !== "object" || Array.isArray(style) || style === null)) {
+    throw new Error("style must be an object");
+  }
+
+  if (style?.position && !["top", "center", "bottom"].includes(style.position)) {
+    throw new Error("style.position must be one of: top, center, bottom");
+  }
+}
+
+function applyStyleToAss(assContent, style = {}) {
+  const newStyleLine = buildStyleLine(style);
+
+  const updated = assContent.replace(/^Style:\s*Default,.*$/m, newStyleLine);
+
+  if (updated === assContent) {
+    throw new Error("Could not replace ASS style line");
+  }
+
+  return updated;
+}
+
 app.get("/health", async (_req, res) => {
   try {
     const result = await runCommand("ffmpeg", ["-version"]);
@@ -70,6 +157,56 @@ app.get("/health", async (_req, res) => {
     res.status(500).json({
       status: "error",
       message: "FFmpeg not available",
+      details: err.message
+    });
+  }
+});
+
+app.post("/render-ass", async (req, res) => {
+  const jobId = uuidv4();
+  const workDir = path.join(TMP_DIR, jobId);
+  const inputVideoPath = path.join(workDir, "input.mp4");
+  const subtitlePath = path.join(workDir, "subtitles.ass");
+  const outputVideoPath = path.join(workDir, "output.mp4");
+
+  try {
+    validateRenderRequest(req.body);
+
+    const { videoUrl, assContent, style } = req.body;
+
+    await fs.ensureDir(workDir);
+
+    const updatedAssContent = applyStyleToAss(assContent, style || {});
+    await fs.writeFile(subtitlePath, updatedAssContent, "utf8");
+
+    await downloadFile(videoUrl, inputVideoPath);
+
+    await runCommand("ffmpeg", [
+      "-y",
+      "-i",
+      inputVideoPath,
+      "-vf",
+      `ass=${subtitlePath}`,
+      "-c:a",
+      "copy",
+      outputVideoPath
+    ]);
+
+    res.setHeader("Content-Type", "video/mp4");
+    res.setHeader("Content-Disposition", 'inline; filename="output.mp4"');
+
+    const stream = fs.createReadStream(outputVideoPath);
+    stream.pipe(res);
+
+    stream.on("close", async () => {
+      await fs.remove(workDir).catch(() => {});
+    });
+  } catch (err) {
+    await fs.remove(workDir).catch(() => {});
+
+    res.status(500).json({
+      success: false,
+      error: "Video render failed",
       details: err.message
     });
   }
