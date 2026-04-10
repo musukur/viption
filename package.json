@@ -1,1 +1,16 @@
-
+{
+  "name": "subtitle-render-api",
+  "version": "1.0.0",
+  "description": "API to burn ASS subtitles into video using FFmpeg",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.7",
+    "express": "^4.21.0",
+    "fs-extra": "^11.2.0",
+    "uuid": "^10.0.0"
+  }
+}
