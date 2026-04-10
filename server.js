@@ -1,9 +1,19 @@
 import express from "express";
+import axios from "axios";
+import fs from "fs-extra";
+import path from "path";
 import { spawn } from "child_process";
+import { fileURLToPath } from "url";
+import { v4 as uuidv4 } from "uuid";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
+app.use(express.json({ limit: "20mb" }));
 
-app.use(express.json());
+const TMP_DIR = path.join(__dirname, "tmp");
+await fs.ensureDir(TMP_DIR);
 
 function runCommand(command, args) {
   return new Promise((resolve, reject) => {
@@ -32,7 +42,22 @@ function runCommand(command, args) {
   });
 }
 
-app.get("/health", async (req, res) => {
+async function downloadFile(url, outputPath) {
+  const response = await axios.get(url, {
+    responseType: "stream",
+    timeout: 120000,
+    maxRedirects: 5
+  });
+
+  await new Promise((resolve, reject) => {
+    const writer = fs.createWriteStream(outputPath);
+    response.data.pipe(writer);
+    writer.on("finish", resolve);
+    writer.on("error", reject);
+  });
+}
+
+app.get("/health", async (_req, res) => {
   try {
     const result = await runCommand("ffmpeg", ["-version"]);
 
