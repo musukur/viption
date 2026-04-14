@@ -181,9 +181,9 @@ async function createImageClip({
     "-s", `${width}x${height}`,
     "-pix_fmt", "yuv420p",
     "-c:v", "libx264",
-    "-preset", "veryfast",
-    "-crf", "23",
-    "-threads", "2",
+    "-preset", "ultrafast",
+    "-crf", "28",
+    "-threads", "1",
     clipPath
   ]);
 }
@@ -281,10 +281,7 @@ app.post("/render/video", async (req, res) => {
       "-f", "concat",
       "-safe", "0",
       "-i", concatFilePath,
-      "-c:v", "libx264",
-      "-pix_fmt", "yuv420p",
-      "-preset", "medium",
-      "-crf", "20",
+      "-c", "copy",
       mergedPath
     ]);
 
@@ -296,8 +293,9 @@ app.post("/render/video", async (req, res) => {
       "-i", audioPath,
       "-c:v", "copy",
       "-c:a", "aac",
-      "-b:a", "192k",
+      "-b:a", "128k",
       "-shortest",
+      "-threads", "1",
       finalPath
     ]);
 
