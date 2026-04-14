@@ -132,22 +132,25 @@ function validateRenderRequest(body) {
   }
 }
 
-function getMotionFilter(index, width, height, fps, durationSec) {
-  const totalFrames = Math.max(1, Math.round(durationSec * fps));
+function getMotionFilter(index, width, height) {
   const variant = index % 4;
 
   switch (variant) {
     case 0:
-      return `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},zoompan=z='min(zoom+0.00035,1.08)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${totalFrames}:s=${width}x${height}:fps=${fps}`;
+      // slow zoom in (safe)
+      return `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},scale=iw*1.05:ih*1.05`;
 
     case 1:
-      return `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},zoompan=z='1.03':x='(iw-iw/zoom)*(on/${totalFrames})':y='ih/2-(ih/zoom/2)':d=${totalFrames}:s=${width}x${height}:fps=${fps}`;
+      // slight left pan
+      return `scale=${width + 200}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}:x=20`;
 
     case 2:
-      return `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},zoompan=z='if(lte(on,1),1.08,max(1.0,zoom-0.00035))':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${totalFrames}:s=${width}x${height}:fps=${fps}`;
+      // slight right pan
+      return `scale=${width + 200}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}:x=100`;
 
     default:
-      return `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},zoompan=z='1.03':x='(iw-iw/zoom)*(1-on/${totalFrames})':y='ih/2-(ih/zoom/2)':d=${totalFrames}:s=${width}x${height}:fps=${fps}`;
+      // slight vertical drift
+      return `scale=${width}:${height + 200}:force_original_aspect_ratio=increase,crop=${width}:${height}:y=50`;
   }
 }
 
@@ -160,15 +163,14 @@ async function createImageClip({
   height = 1920,
   fps = 25
 }) {
-  const totalFrames = Math.max(1, Math.round(durationSec * fps));
-  const vf = getMotionFilter(index, width, height, fps, durationSec);
+  const vf = getMotionFilter(index, width, height);
 
   await runCommand("ffmpeg", [
     "-y",
     "-loop", "1",
     "-i", imagePath,
+    "-t", durationSec.toString(),   // ✅ safe again
     "-vf", vf,
-    "-frames:v", String(totalFrames),
     "-r", String(fps),
     "-pix_fmt", "yuv420p",
     "-c:v", "libx264",
