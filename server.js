@@ -172,8 +172,12 @@ async function createImageClip({
 }) {
   const frames = Math.max(1, Math.round(durationSec * fps));
 
-  const vf = getMotionFilter(index, width, height, fps, durationSec);
+  const motion = getMotionFilter(index, width, height, fps, durationSec);
 
+  const effects = "eq=contrast=1.08:saturation=1.15:brightness=0.02,unsharp=5:5:0.6:3:3:0.3";
+
+  const vf = `${motion},${effects}`;
+  
   await runCommand("ffmpeg", [
     "-y",
     "-loop", "1",
