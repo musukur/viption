@@ -135,20 +135,18 @@ function getMotionFilter(index, width, height, fps, durationSec) {
   const totalFrames = Math.max(1, Math.round(durationSec * fps));
   const variant = index % 4;
 
-  // Subtle, cinematic-safe motions only
   switch (variant) {
     case 0:
-      // soft push in
       return `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},zoompan=z='min(zoom+0.00035,1.08)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${totalFrames}:s=${width}x${height}:fps=${fps}`;
+
     case 1:
-      // soft pan left
-      return `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},zoompan=z='1.03':x='max(0,min((iw-iw/zoom)*0.35 + on*0.4,(iw-iw/zoom)))':y='ih/2-(ih/zoom/2)':d=${totalFrames}:s=${width}x${height}:fps=${fps}`;
+      return `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},zoompan=z='1.03':x='(iw-iw/zoom)*(on/${totalFrames})':y='ih/2-(ih/zoom/2)':d=${totalFrames}:s=${width}x${height}:fps=${fps}`;
+
     case 2:
-      // soft pull out
       return `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},zoompan=z='if(lte(on,1),1.08,max(1.0,zoom-0.00035))':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${totalFrames}:s=${width}x${height}:fps=${fps}`;
+
     default:
-      // soft pan right
-      return `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},zoompan=z='1.03':x='max(0,min((iw-iw/zoom)*0.65 - on*0.4,(iw-iw/zoom)))':y='ih/2-(ih/zoom/2)':d=${totalFrames}:s=${width}x${height}:fps=${fps}`;
+      return `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},zoompan=z='1.03':x='(iw-iw/zoom)*(1 - on/${totalFrames})':y='ih/2-(ih/zoom/2)':d=${totalFrames}:s=${width}x${height}:fps=${fps}`;
   }
 }
 
