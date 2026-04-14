@@ -138,25 +138,30 @@ function validateRenderRequest(body) {
   }
 }
 
-function getMotionFilter(index, width, height) {
-  const variant = index % 4;
+function getMotionFilter(index, width, height, durationSec) {
+  const variant = index % 5;
+  const d = Math.max(durationSec, 1);
 
   switch (variant) {
     case 0:
-      // subtle zoom-in feel
-      return `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1`;
+      // cinematic push in
+      return `scale=${Math.round(width * 1.18)}:${Math.round(height * 1.18)}:force_original_aspect_ratio=increase,crop=${width}:${height}:x='(in_w-out_w)/2':y='(in_h-out_h)/2 - ((in_h-out_h)*0.08)*(t/${d})',setsar=1`;
 
     case 1:
-      // slight left framing
-      return `scale=${width + 80}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}:x=20:y=0,setsar=1`;
+      // slow left to right pan
+      return `scale=${width + 240}:${height + 120}:force_original_aspect_ratio=increase,crop=${width}:${height}:x='((in_w-out_w)*0.10) + ((in_w-out_w)*0.45)*(t/${d})':y='(in_h-out_h)/2',setsar=1`;
 
     case 2:
-      // slight right framing
-      return `scale=${width + 80}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}:x=60:y=0,setsar=1`;
+      // slow right to left pan
+      return `scale=${width + 240}:${height + 120}:force_original_aspect_ratio=increase,crop=${width}:${height}:x='((in_w-out_w)*0.55) - ((in_w-out_w)*0.40)*(t/${d})':y='(in_h-out_h)/2',setsar=1`;
+
+    case 3:
+      // subtle pull out
+      return `scale=${Math.round(width * 1.14)}:${Math.round(height * 1.14)}:force_original_aspect_ratio=increase,crop=${width}:${height}:x='(in_w-out_w)/2 + ((in_w-out_w)*0.04)*(1-t/${d})':y='(in_h-out_h)/2 + ((in_h-out_h)*0.04)*(1-t/${d})',setsar=1`;
 
     default:
-      // slight upward framing
-      return `scale=${width}:${height + 120}:force_original_aspect_ratio=increase,crop=${width}:${height}:x=0:y=40,setsar=1`;
+      // upward drift
+      return `scale=${width + 120}:${height + 260}:force_original_aspect_ratio=increase,crop=${width}:${height}:x='(in_w-out_w)/2':y='((in_h-out_h)*0.30) - ((in_h-out_h)*0.20)*(t/${d})',setsar=1`;
   }
 }
 
@@ -169,7 +174,13 @@ async function createImageClip({
   height = 1920,
   fps = 25
 }) {
-  const vf = getMotionFilter(index, width, height);
+  const motionFilter = getMotionFilter(index, width, height, durationSec);
+
+  const fadeIn = 0.35;
+  const fadeOut = 0.35;
+  const fadeOutStart = Math.max(durationSec - fadeOut, 0);
+
+  const vf = `${motionFilter},fade=t=in:st=0:d=${fadeIn},fade=t=out:st=${fadeOutStart}:d=${fadeOut}`;
 
   await runCommand("ffmpeg", [
     "-y",
@@ -184,6 +195,7 @@ async function createImageClip({
     "-preset", "ultrafast",
     "-crf", "28",
     "-threads", "1",
+    "-movflags", "+faststart",
     clipPath
   ]);
 }
