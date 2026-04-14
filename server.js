@@ -144,20 +144,20 @@ function getMotionFilter(index, width, height, fps, durationSec) {
 
   switch (variant) {
     case 0:
-      // CENTER PUSH-IN (MOST USED IN REELS)
-      return `scale=3000:-1,zoompan=z='zoom+0.0006':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frames}:s=${width}x${height}:fps=${fps}`;
+      // stronger center push-in
+      return `scale=3400:-1,zoompan=z='min(zoom+0.0016,1.5)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frames}:s=${width}x${height}:fps=${fps}`;
 
     case 1:
-      // LEFT FOCUS PUSH-IN
-      return `scale=3000:-1,zoompan=z='zoom+0.0006':x='0':y='ih/2-(ih/zoom/2)':d=${frames}:s=${width}x${height}:fps=${fps}`;
+      // stronger left-focus push-in
+      return `scale=3400:-1,zoompan=z='min(zoom+0.0016,1.5)':x='0':y='ih/2-(ih/zoom/2)':d=${frames}:s=${width}x${height}:fps=${fps}`;
 
     case 2:
-      // RIGHT FOCUS PUSH-IN
-      return `scale=3000:-1,zoompan=z='zoom+0.0006':x='iw-iw/zoom':y='ih/2-(ih/zoom/2)':d=${frames}:s=${width}x${height}:fps=${fps}`;
+      // stronger right-focus push-in
+      return `scale=3400:-1,zoompan=z='min(zoom+0.0016,1.5)':x='iw-iw/zoom':y='ih/2-(ih/zoom/2)':d=${frames}:s=${width}x${height}:fps=${fps}`;
 
     default:
-      // ZOOM OUT (story transition feel)
-      return `scale=3000:-1,zoompan=z='if(lte(on,1),1.2,max(1.0,zoom-0.0006))':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frames}:s=${width}x${height}:fps=${fps}`;
+      // noticeable zoom-out
+      return `scale=3400:-1,zoompan=z='if(lte(on,1),1.5,max(1.0,zoom-0.0016))':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frames}:s=${width}x${height}:fps=${fps}`;
   }
 }
 
