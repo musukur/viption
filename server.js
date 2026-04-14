@@ -138,30 +138,26 @@ function validateRenderRequest(body) {
   }
 }
 
-function getMotionFilter(index, width, height, durationSec) {
-  const variant = index % 5;
-  const d = Math.max(durationSec, 1);
+function getMotionFilter(index, width, height, fps, durationSec) {
+  const frames = Math.max(1, Math.round(durationSec * fps));
+  const variant = index % 4;
 
   switch (variant) {
     case 0:
-      // cinematic push in
-      return `scale=${Math.round(width * 1.18)}:${Math.round(height * 1.18)}:force_original_aspect_ratio=increase,crop=${width}:${height}:x='(in_w-out_w)/2':y='(in_h-out_h)/2 - ((in_h-out_h)*0.08)*(t/${d})',setsar=1`;
+      // CENTER PUSH-IN (MOST USED IN REELS)
+      return `scale=3000:-1,zoompan=z='zoom+0.0006':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frames}:s=${width}x${height}:fps=${fps}`;
 
     case 1:
-      // slow left to right pan
-      return `scale=${width + 240}:${height + 120}:force_original_aspect_ratio=increase,crop=${width}:${height}:x='((in_w-out_w)*0.10) + ((in_w-out_w)*0.45)*(t/${d})':y='(in_h-out_h)/2',setsar=1`;
+      // LEFT FOCUS PUSH-IN
+      return `scale=3000:-1,zoompan=z='zoom+0.0006':x='0':y='ih/2-(ih/zoom/2)':d=${frames}:s=${width}x${height}:fps=${fps}`;
 
     case 2:
-      // slow right to left pan
-      return `scale=${width + 240}:${height + 120}:force_original_aspect_ratio=increase,crop=${width}:${height}:x='((in_w-out_w)*0.55) - ((in_w-out_w)*0.40)*(t/${d})':y='(in_h-out_h)/2',setsar=1`;
-
-    case 3:
-      // subtle pull out
-      return `scale=${Math.round(width * 1.14)}:${Math.round(height * 1.14)}:force_original_aspect_ratio=increase,crop=${width}:${height}:x='(in_w-out_w)/2 + ((in_w-out_w)*0.04)*(1-t/${d})':y='(in_h-out_h)/2 + ((in_h-out_h)*0.04)*(1-t/${d})',setsar=1`;
+      // RIGHT FOCUS PUSH-IN
+      return `scale=3000:-1,zoompan=z='zoom+0.0006':x='iw-iw/zoom':y='ih/2-(ih/zoom/2)':d=${frames}:s=${width}x${height}:fps=${fps}`;
 
     default:
-      // upward drift
-      return `scale=${width + 120}:${height + 260}:force_original_aspect_ratio=increase,crop=${width}:${height}:x='(in_w-out_w)/2':y='((in_h-out_h)*0.30) - ((in_h-out_h)*0.20)*(t/${d})',setsar=1`;
+      // ZOOM OUT (story transition feel)
+      return `scale=3000:-1,zoompan=z='if(lte(on,1),1.2,max(1.0,zoom-0.0006))':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frames}:s=${width}x${height}:fps=${fps}`;
   }
 }
 
@@ -174,28 +170,21 @@ async function createImageClip({
   height = 1920,
   fps = 25
 }) {
-  const motionFilter = getMotionFilter(index, width, height, durationSec);
+  const frames = Math.max(1, Math.round(durationSec * fps));
 
-  const fadeIn = 0.35;
-  const fadeOut = 0.35;
-  const fadeOutStart = Math.max(durationSec - fadeOut, 0);
-
-  const vf = `${motionFilter},fade=t=in:st=0:d=${fadeIn},fade=t=out:st=${fadeOutStart}:d=${fadeOut}`;
+  const vf = getMotionFilter(index, width, height, fps, durationSec);
 
   await runCommand("ffmpeg", [
     "-y",
     "-loop", "1",
     "-i", imagePath,
-    "-t", durationSec.toString(),
     "-vf", vf,
-    "-r", String(fps),
-    "-s", `${width}x${height}`,
+    "-frames:v", String(frames),
     "-pix_fmt", "yuv420p",
     "-c:v", "libx264",
     "-preset", "ultrafast",
     "-crf", "28",
     "-threads", "1",
-    "-movflags", "+faststart",
     clipPath
   ]);
 }
