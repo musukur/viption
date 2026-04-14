@@ -17,7 +17,9 @@ await fs.ensureDir(TMP_DIR);
 
 function runCommand(command, args) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command, args, {
+      stdio: ["ignore", "pipe", "pipe"]
+    });
 
     let stdout = "";
     let stderr = "";
@@ -30,11 +32,15 @@ function runCommand(command, args) {
       stderr += data.toString();
     });
 
-    child.on("close", (code) => {
+    child.on("close", (code, signal) => {
       if (code === 0) {
         resolve({ stdout, stderr });
       } else {
-        reject(new Error(`${command} failed with code ${code}\n${stderr}`));
+        reject(
+          new Error(
+            `${command} failed with code ${code} signal ${signal}\n${stderr}`
+          )
+        );
       }
     });
 
@@ -137,20 +143,20 @@ function getMotionFilter(index, width, height) {
 
   switch (variant) {
     case 0:
-      // slow zoom in (safe)
-      return `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},scale=iw*1.05:ih*1.05`;
+      // subtle zoom-in feel
+      return `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1`;
 
     case 1:
-      // slight left pan
-      return `scale=${width + 200}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}:x=20`;
+      // slight left framing
+      return `scale=${width + 80}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}:x=20:y=0,setsar=1`;
 
     case 2:
-      // slight right pan
-      return `scale=${width + 200}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}:x=100`;
+      // slight right framing
+      return `scale=${width + 80}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}:x=60:y=0,setsar=1`;
 
     default:
-      // slight vertical drift
-      return `scale=${width}:${height + 200}:force_original_aspect_ratio=increase,crop=${width}:${height}:y=50`;
+      // slight upward framing
+      return `scale=${width}:${height + 120}:force_original_aspect_ratio=increase,crop=${width}:${height}:x=0:y=40,setsar=1`;
   }
 }
 
@@ -169,13 +175,15 @@ async function createImageClip({
     "-y",
     "-loop", "1",
     "-i", imagePath,
-    "-t", durationSec.toString(),   // ✅ safe again
+    "-t", durationSec.toString(),
     "-vf", vf,
     "-r", String(fps),
+    "-s", `${width}x${height}`,
     "-pix_fmt", "yuv420p",
     "-c:v", "libx264",
-    "-preset", "medium",
-    "-crf", "20",
+    "-preset", "veryfast",
+    "-crf", "23",
+    "-threads", "2",
     clipPath
   ]);
 }
