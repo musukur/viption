@@ -131,7 +131,52 @@ function validateRenderRequest(body) {
     throw new Error("style.position must be one of: top, center, bottom");
   }
 }
+function getMotionFilter(index, width, height, fps, durationSec) {
+  const totalFrames = Math.max(1, Math.round(durationSec * fps));
+  const variant = index % 4;
 
+  // Subtle, cinematic-safe motions only
+  switch (variant) {
+    case 0:
+      // soft push in
+      return `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},zoompan=z='min(zoom+0.00035,1.08)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${totalFrames}:s=${width}x${height}:fps=${fps}`;
+    case 1:
+      // soft pan left
+      return `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},zoompan=z='1.03':x='max(0,min((iw-iw/zoom)*0.35 + on*0.4,(iw-iw/zoom)))':y='ih/2-(ih/zoom/2)':d=${totalFrames}:s=${width}x${height}:fps=${fps}`;
+    case 2:
+      // soft pull out
+      return `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},zoompan=z='if(lte(on,1),1.08,max(1.0,zoom-0.00035))':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${totalFrames}:s=${width}x${height}:fps=${fps}`;
+    default:
+      // soft pan right
+      return `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},zoompan=z='1.03':x='max(0,min((iw-iw/zoom)*0.65 - on*0.4,(iw-iw/zoom)))':y='ih/2-(ih/zoom/2)':d=${totalFrames}:s=${width}x${height}:fps=${fps}`;
+  }
+}
+
+async function createImageClip({
+  imagePath,
+  clipPath,
+  durationSec,
+  index,
+  width = 1080,
+  height = 1920,
+  fps = 25
+}) {
+  const vf = getMotionFilter(index, width, height, fps, durationSec);
+
+  await runCommand("ffmpeg", [
+    "-y",
+    "-loop", "1",
+    "-i", imagePath,
+    "-t", durationSec.toString(),
+    "-vf", vf,
+    "-r", String(fps),
+    "-pix_fmt", "yuv420p",
+    "-c:v", "libx264",
+    "-preset", "medium",
+    "-crf", "20",
+    clipPath
+  ]);
+}
 function applyStyleToAss(assContent, style = {}) {
   const newStyleLine = buildStyleLine(style);
 
@@ -153,6 +198,117 @@ function applyStyleToAss(assContent, style = {}) {
 
   throw new Error("Could not find ASS style section");
 }
+
+app.post("/render/video", async (req, res) => {
+  const jobId = uuidv4();
+  const workDir = path.join(TMP_DIR, jobId);
+
+  try {
+    const { audioUrl, totalDurationMs, images } = req.body;
+
+    if (!audioUrl || typeof audioUrl !== "string") {
+      throw new Error("audioUrl is required and must be a string");
+    }
+
+    if (!totalDurationMs || typeof totalDurationMs !== "number") {
+      throw new Error("totalDurationMs is required and must be a number");
+    }
+
+    if (!Array.isArray(images) || images.length === 0) {
+      throw new Error("images is required and must be a non-empty array");
+    }
+
+    await fs.ensureDir(workDir);
+
+    const width = 1080;
+    const height = 1920;
+    const fps = 25;
+
+    const audioPath = path.join(workDir, "audio.mp3");
+    await downloadFile(audioUrl, audioPath);
+
+    const clipPaths = [];
+
+    // 1. Download images + create cinematic clips
+    for (let i = 0; i < images.length; i++) {
+      const image = images[i];
+
+      if (!image.url || typeof image.url !== "string") {
+        throw new Error(`images[${i}].url is required`);
+      }
+
+      if (!image.duration || typeof image.duration !== "number") {
+        throw new Error(`images[${i}].duration is required`);
+      }
+
+      const imagePath = path.join(workDir, `image_${i}.jpg`);
+      const clipPath = path.join(workDir, `clip_${i}.mp4`);
+
+      await downloadFile(image.url, imagePath);
+      await createImageClip({
+        imagePath,
+        clipPath,
+        durationSec: image.duration / 1000,
+        index: i,
+        width,
+        height,
+        fps
+      });
+
+      clipPaths.push(clipPath);
+    }
+
+    // 2. Build concat list
+    const concatFilePath = path.join(workDir, "files.txt");
+    const concatContent = clipPaths.map((clip) => `file '${clip}'`).join("\n");
+    await fs.writeFile(concatFilePath, concatContent, "utf8");
+
+    // 3. Merge clips
+    const mergedPath = path.join(workDir, "merged.mp4");
+    await runCommand("ffmpeg", [
+      "-y",
+      "-f", "concat",
+      "-safe", "0",
+      "-i", concatFilePath,
+      "-c:v", "libx264",
+      "-pix_fmt", "yuv420p",
+      "-preset", "medium",
+      "-crf", "20",
+      mergedPath
+    ]);
+
+    // 4. Add audio
+    const finalPath = path.join(workDir, "final.mp4");
+    await runCommand("ffmpeg", [
+      "-y",
+      "-i", mergedPath,
+      "-i", audioPath,
+      "-c:v", "copy",
+      "-c:a", "aac",
+      "-b:a", "192k",
+      "-shortest",
+      finalPath
+    ]);
+
+    res.setHeader("Content-Type", "video/mp4");
+    res.setHeader("Content-Disposition", 'inline; filename="video.mp4"');
+
+    const stream = fs.createReadStream(finalPath);
+    stream.pipe(res);
+
+    stream.on("close", async () => {
+      await fs.remove(workDir).catch(() => {});
+    });
+  } catch (err) {
+    await fs.remove(workDir).catch(() => {});
+
+    res.status(500).json({
+      success: false,
+      error: "Video render failed",
+      details: err.message
+    });
+  }
+});
 
 app.get("/health", async (_req, res) => {
   try {
