@@ -131,6 +131,7 @@ function validateRenderRequest(body) {
     throw new Error("style.position must be one of: top, center, bottom");
   }
 }
+
 function getMotionFilter(index, width, height, fps, durationSec) {
   const totalFrames = Math.max(1, Math.round(durationSec * fps));
   const variant = index % 4;
@@ -146,7 +147,7 @@ function getMotionFilter(index, width, height, fps, durationSec) {
       return `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},zoompan=z='if(lte(on,1),1.08,max(1.0,zoom-0.00035))':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${totalFrames}:s=${width}x${height}:fps=${fps}`;
 
     default:
-      return `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},zoompan=z='1.03':x='(iw-iw/zoom)*(1 - on/${totalFrames})':y='ih/2-(ih/zoom/2)':d=${totalFrames}:s=${width}x${height}:fps=${fps}`;
+      return `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},zoompan=z='1.03':x='(iw-iw/zoom)*(1-on/${totalFrames})':y='ih/2-(ih/zoom/2)':d=${totalFrames}:s=${width}x${height}:fps=${fps}`;
   }
 }
 
@@ -159,14 +160,15 @@ async function createImageClip({
   height = 1920,
   fps = 25
 }) {
+  const totalFrames = Math.max(1, Math.round(durationSec * fps));
   const vf = getMotionFilter(index, width, height, fps, durationSec);
 
   await runCommand("ffmpeg", [
     "-y",
     "-loop", "1",
     "-i", imagePath,
-    "-t", durationSec.toString(),
     "-vf", vf,
+    "-frames:v", String(totalFrames),
     "-r", String(fps),
     "-pix_fmt", "yuv420p",
     "-c:v", "libx264",
@@ -175,6 +177,7 @@ async function createImageClip({
     clipPath
   ]);
 }
+
 function applyStyleToAss(assContent, style = {}) {
   const newStyleLine = buildStyleLine(style);
 
