@@ -138,26 +138,31 @@ function validateRenderRequest(body) {
   }
 }
 
-function getMotionFilter(index, width, height, fps, durationSec) {
+function getMotionFilter(index, width, height, fps, durationSec, scaleSize) {
   const frames = Math.max(1, Math.round(durationSec * fps));
   const variant = index % 4;
+  const isHorizontal = width > height;
 
+  const yExpr = isHorizontal
+    ? "ih/3-(ih/zoom/3)"
+    : "ih/2-(ih/zoom/2)";
+  
   switch (variant) {
     case 0:
       // stronger center push-in
-      return `scale=3400:-1,zoompan=z='min(zoom+0.0016,1.5)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frames}:s=${width}x${height}:fps=${fps}`;
+      return `scale=${scaleSize}:-1,zoompan=z='min(zoom+0.0016,1.5)':x='iw/2-(iw/zoom/2)':y=${yExpr}:d=${frames}:s=${width}x${height}:fps=${fps}`;
 
     case 1:
       // stronger left-focus push-in
-      return `scale=3400:-1,zoompan=z='min(zoom+0.0016,1.5)':x='0':y='ih/2-(ih/zoom/2)':d=${frames}:s=${width}x${height}:fps=${fps}`;
+      return `scale=${scaleSize}:-1,zoompan=z='min(zoom+0.0016,1.5)':x='0':y=${yExpr}:d=${frames}:s=${width}x${height}:fps=${fps}`;
 
     case 2:
       // stronger right-focus push-in
-      return `scale=3400:-1,zoompan=z='min(zoom+0.0016,1.5)':x='iw-iw/zoom':y='ih/2-(ih/zoom/2)':d=${frames}:s=${width}x${height}:fps=${fps}`;
+      return `scale=${scaleSize}:-1,zoompan=z='min(zoom+0.0016,1.5)':x='iw-iw/zoom':y=${yExpr}:d=${frames}:s=${width}x${height}:fps=${fps}`;
 
     default:
       // noticeable zoom-out
-      return `scale=3400:-1,zoompan=z='if(lte(on,1),1.5,max(1.0,zoom-0.0016))':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frames}:s=${width}x${height}:fps=${fps}`;
+      return `scale=${scaleSize}:-1,zoompan=z='if(lte(on,1),1.5,max(1.0,zoom-0.0016))':x='iw/2-(iw/zoom/2)':y=${yExpr}:d=${frames}:s=${width}x${height}:fps=${fps}`;
   }
 }
 
@@ -166,31 +171,64 @@ async function createImageClip({
   clipPath,
   durationSec,
   index,
-  width = 1080,
-  height = 1920,
-  fps = 25
+  width,
+  height,
+  fps = 25,
+  scaleSize
 }) {
   const frames = Math.max(1, Math.round(durationSec * fps));
 
-  const motion = getMotionFilter(index, width, height, fps, durationSec);
+  const motion = getMotionFilter(
+    index,
+    width,
+    height,
+    fps,
+    durationSec,
+    scaleSize
+  );
 
-  const effects = "eq=contrast=1.08:saturation=1.15:brightness=0.02,unsharp=5:5:0.6:3:3:0.3";
+  const effects =
+    "eq=contrast=1.08:saturation=1.15:brightness=0.02,unsharp=5:5:0.6:3:3:0.3";
 
-  const vf = `${motion},${effects}`;
-  
+  const isVertical = height > width;
+
+  const baseFit = isVertical
+    ? `scale=-1:${height}`
+    : `scale=${width}:-1`;
+
+  const vf = `${baseFit},${motion},${effects},format=yuv420p`;
+
   await runCommand("ffmpeg", [
     "-y",
     "-loop", "1",
     "-i", imagePath,
     "-vf", vf,
     "-frames:v", String(frames),
-    "-pix_fmt", "yuv420p",
     "-c:v", "libx264",
     "-preset", "ultrafast",
     "-crf", "28",
     "-threads", "1",
     clipPath
   ]);
+}
+
+function getAspectConfig(aspectRatio = "9:16") {
+  switch (aspectRatio) {
+    case "16:9":
+      return {
+        width: 1920,
+        height: 1080,
+        scale: 2560
+      };
+
+    case "9:16":
+    default:
+      return {
+        width: 1080,
+        height: 1920,
+        scale: 3400
+      };
+  }
 }
 
 function applyStyleToAss(assContent, style = {}) {
@@ -236,8 +274,12 @@ app.post("/render/video", async (req, res) => {
 
     await fs.ensureDir(workDir);
 
-    const width = 1080;
-    const height = 1920;
+    const { audioUrl, totalDurationMs, images, aspectRatio } = req.body;
+
+    const config = getAspectConfig(aspectRatio);
+    
+    const width = config.width;
+    const height = config.height;
     const fps = 25;
 
     const audioPath = path.join(workDir, "audio.mp3");
@@ -268,7 +310,8 @@ app.post("/render/video", async (req, res) => {
         index: i,
         width,
         height,
-        fps
+        fps,
+        scaleSize: config.scale
       });
 
       clipPaths.push(clipPath);
