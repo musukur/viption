@@ -258,7 +258,8 @@ app.post("/render/video", async (req, res) => {
   const workDir = path.join(TMP_DIR, jobId);
 
   try {
-    const { audioUrl, totalDurationMs, images } = req.body;
+    // ✅ SINGLE destructuring (fixed)
+    const { audioUrl, totalDurationMs, images, aspectRatio } = req.body;
 
     if (!audioUrl || typeof audioUrl !== "string") {
       throw new Error("audioUrl is required and must be a string");
@@ -274,10 +275,9 @@ app.post("/render/video", async (req, res) => {
 
     await fs.ensureDir(workDir);
 
-    const { audioUrl, totalDurationMs, images, aspectRatio } = req.body;
-
+    // ✅ aspect config
     const config = getAspectConfig(aspectRatio);
-    
+
     const width = config.width;
     const height = config.height;
     const fps = 25;
@@ -287,7 +287,6 @@ app.post("/render/video", async (req, res) => {
 
     const clipPaths = [];
 
-    // 1. Download images + create cinematic clips
     for (let i = 0; i < images.length; i++) {
       const image = images[i];
 
@@ -303,6 +302,7 @@ app.post("/render/video", async (req, res) => {
       const clipPath = path.join(workDir, `clip_${i}.mp4`);
 
       await downloadFile(image.url, imagePath);
+
       await createImageClip({
         imagePath,
         clipPath,
@@ -317,12 +317,10 @@ app.post("/render/video", async (req, res) => {
       clipPaths.push(clipPath);
     }
 
-    // 2. Build concat list
     const concatFilePath = path.join(workDir, "files.txt");
     const concatContent = clipPaths.map((clip) => `file '${clip}'`).join("\n");
     await fs.writeFile(concatFilePath, concatContent, "utf8");
 
-    // 3. Merge clips
     const mergedPath = path.join(workDir, "merged.mp4");
     await runCommand("ffmpeg", [
       "-y",
@@ -333,7 +331,6 @@ app.post("/render/video", async (req, res) => {
       mergedPath
     ]);
 
-    // 4. Add audio
     const finalPath = path.join(workDir, "final.mp4");
     await runCommand("ffmpeg", [
       "-y",
@@ -356,6 +353,7 @@ app.post("/render/video", async (req, res) => {
     stream.on("close", async () => {
       await fs.remove(workDir).catch(() => {});
     });
+
   } catch (err) {
     await fs.remove(workDir).catch(() => {});
 
