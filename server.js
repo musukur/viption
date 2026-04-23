@@ -150,19 +150,19 @@ function getMotionFilter(index, width, height, fps, durationSec, scaleSize) {
   switch (variant) {
     case 0:
       // stronger center push-in
-      return `scale=${scaleSize}:-1,zoompan=z='min(zoom+0.0016,1.5)':x='iw/2-(iw/zoom/2)':y=${yExpr}:d=${frames}:s=${width}x${height}:fps=${fps}`;
+      return `scale=${scaleSize}:-1,zoompan=z='zoom+0.0012':x='floor(iw/2-(iw/zoom/2))':y='floor(${yExpr})':d=${frames}:s=${width}x${height}:fps=${fps}`;
 
     case 1:
       // stronger left-focus push-in
-      return `scale=${scaleSize}:-1,zoompan=z='min(zoom+0.0016,1.5)':x='0':y=${yExpr}:d=${frames}:s=${width}x${height}:fps=${fps}`;
+      return `scale=${scaleSize}:-1,zoompan=z='zoom+0.0012':x='0':y='floor(${yExpr})':d=${frames}:s=${width}x${height}:fps=${fps}`;
 
     case 2:
       // stronger right-focus push-in
-      return `scale=${scaleSize}:-1,zoompan=z='min(zoom+0.0016,1.5)':x='iw-iw/zoom':y=${yExpr}:d=${frames}:s=${width}x${height}:fps=${fps}`;
+      return `scale=${scaleSize}:-1,zoompan=z='zoom+0.0012':x='iw-iw/zoom':y='floor(${yExpr})':d=${frames}:s=${width}x${height}:fps=${fps}`;
 
     default:
       // noticeable zoom-out
-      return `scale=${scaleSize}:-1,zoompan=z='if(lte(on,1),1.5,max(1.0,zoom-0.0016))':x='iw/2-(iw/zoom/2)':y=${yExpr}:d=${frames}:s=${width}x${height}:fps=${fps}`;
+      return `scale=${scaleSize}:-1,zoompan=z='if(eq(on,1),1.5,zoom-0.0012)':x='floor(iw/2-(iw/zoom/2))':y='floor(${yExpr})':d=${frames}:s=${width}x${height}:fps=${fps}`;
   }
 }
 
