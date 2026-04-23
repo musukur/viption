@@ -108,6 +108,8 @@ async function createImageClip({
   fps = 25
 }) {
 
+  const frames = Math.floor(durationSec * fps);
+
   const motion = getMotionFilter(index, width, height, durationSec, fps);
 
   const vf = [
@@ -120,12 +122,20 @@ async function createImageClip({
     "-y",
     "-loop", "1",
     "-i", imagePath,
-    "-t", String(durationSec),
+
+    // ❗ REMOVE -t ❌
+    // "-t", String(durationSec),
+
     "-vf", vf,
+
+    // ❗ IMPORTANT
+    "-frames:v", String(frames),
+
     "-r", String(fps),
     "-c:v", "libx264",
     "-preset", "veryfast",
     "-crf", "28",
+
     clipPath
   ]);
 }
