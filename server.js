@@ -74,23 +74,26 @@ function normalizeDurations(durations, totalSec) {
 /* ===== CINEMATIC MOTION ===== */
 /* ============================= */
 
-function getMotionFilter(index, width, height, durationSec, fps) {
-  const frames = Math.floor(durationSec * fps);
+function getMotionFilter(index, width, height, durationSec) {
   const variant = index % 4;
 
   switch (variant) {
 
     case 0:
-      return `zoompan=z='1+0.15*(on/${frames})':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frames}:s=${width}x${height}:fps=${fps}`;
+      // slow zoom-like effect via crop
+      return `crop=${width}:${height}:(iw-${width})/2:(ih-${height})/2`;
 
     case 1:
-      return `zoompan=z='1.15':x='(on/${frames})*(iw-iw/zoom)':y='ih/2-(ih/zoom/2)':d=${frames}:s=${width}x${height}:fps=${fps}`;
+      // left → right pan
+      return `crop=${width}:${height}:(t/${durationSec})*(iw-${width}):(ih-${height})/2`;
 
     case 2:
-      return `zoompan=z='1.15':x='(iw-iw/zoom)-(on/${frames})*(iw-iw/zoom)':y='ih/2-(ih/zoom/2)':d=${frames}:s=${width}x${height}:fps=${fps}`;
+      // right → left pan
+      return `crop=${width}:${height}:(iw-${width})-(t/${durationSec})*(iw-${width}):(ih-${height})/2`;
 
     default:
-      return `zoompan=z='1.15-0.15*(on/${frames})':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frames}:s=${width}x${height}:fps=${fps}`;
+      // slight vertical movement
+      return `crop=${width}:${height}:(iw-${width})/2:(t/${durationSec})*(ih-${height})`;
   }
 }
 
@@ -108,15 +111,12 @@ async function createImageClip({
   fps = 25
 }) {
 
-  const frames = Math.floor(durationSec * fps);
-
-  const motion = getMotionFilter(index, width, height, durationSec, fps);
+  const motion = getMotionFilter(index, width, height, durationSec);
 
   const vf = [
-    `scale=${width * 1.2}:-1`,
-    `fps=${fps}`,                  // IMPORTANT
-    motion,                        // zoompan
-    `setpts=PTS-STARTPTS`,         // IMPORTANT FIX
+    `scale=${width * 1.3}:${height * 1.3}`,   // zoom effect
+    motion,
+    `fps=${fps}`,
     `format=yuv420p`
   ].join(",");
 
@@ -125,9 +125,9 @@ async function createImageClip({
     "-loop", "1",
     "-i", imagePath,
 
-    "-vf", vf,
+    "-t", String(durationSec),   // ✅ IMPORTANT (bring back -t)
 
-    "-frames:v", String(frames),   // IMPORTANT
+    "-vf", vf,
 
     "-c:v", "libx264",
     "-preset", "veryfast",
