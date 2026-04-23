@@ -74,24 +74,23 @@ function normalizeDurations(durations, totalSec) {
 /* ===== CINEMATIC MOTION ===== */
 /* ============================= */
 
-function getMotionFilter(index, width, height, durationSec) {
+function getMotionFilter(index, width, height, durationSec, fps) {
+  const frames = Math.floor(durationSec * fps);
   const variant = index % 4;
 
-  const progress = `(t/${durationSec})`;
-  const ease = `(${progress}*${progress}*(3-2*${progress}))`;
-
   switch (variant) {
+
     case 0:
-      return `scale=iw*(1+0.12*${ease}):ih*(1+0.12*${ease}),crop=${width}:${height}:(iw-${width})/2:(ih-${height})/2`;
+      return `zoompan=z='1+0.15*(on/${frames})':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frames}:s=${width}x${height}:fps=${fps}`;
 
     case 1:
-      return `scale=iw*1.15:ih*1.15,crop=${width}:${height}:${ease}*(iw-${width}):(ih-${height})/2`;
+      return `zoompan=z='1.15':x='(on/${frames})*(iw-iw/zoom)':y='ih/2-(ih/zoom/2)':d=${frames}:s=${width}x${height}:fps=${fps}`;
 
     case 2:
-      return `scale=iw*1.15:ih*1.15,crop=${width}:${height}:(iw-${width})-${ease}*(iw-${width}):(ih-${height})/2`;
+      return `zoompan=z='1.15':x='(iw-iw/zoom)-(on/${frames})*(iw-iw/zoom)':y='ih/2-(ih/zoom/2)':d=${frames}:s=${width}x${height}:fps=${fps}`;
 
     default:
-      return `scale=iw*(1.12-0.12*${ease}):ih*(1.12-0.12*${ease}),crop=${width}:${height}:(iw-${width})/2:(ih-${height})/2`;
+      return `zoompan=z='1.15-0.15*(on/${frames})':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frames}:s=${width}x${height}:fps=${fps}`;
   }
 }
 
@@ -108,18 +107,14 @@ async function createImageClip({
   height,
   fps = 25
 }) {
-  const motion = getMotionFilter(index, width, height, durationSec);
 
-  const vf = `
-scale=${width * 1.4}:-1,
-split=2[bg][fg];
-[bg]boxblur=20:10,scale=${width}:${height}[bg2];
-[fg]${motion}[fg2];
-[bg2][fg2]overlay=(W-w)/2:(H-h)/2,
-eq=contrast=1.05:saturation=1.1:brightness=0.01,
-fps=${fps},
-format=yuv420p
-`;
+  const motion = getMotionFilter(index, width, height, durationSec, fps);
+
+  const vf = [
+    `scale=${width * 1.2}:-1`,
+    motion,
+    `format=yuv420p`
+  ].join(",");
 
   await runCommand("ffmpeg", [
     "-y",
@@ -129,9 +124,8 @@ format=yuv420p
     "-vf", vf,
     "-r", String(fps),
     "-c:v", "libx264",
-    "-preset", "medium",
-    "-crf", "20",
-    "-pix_fmt", "yuv420p",
+    "-preset", "veryfast",
+    "-crf", "28",
     clipPath
   ]);
 }
@@ -219,7 +213,20 @@ app.post("/render/video", async (req, res) => {
 
     const mergedPath = path.join(workDir, "merged.mp4");
 
-    await mergeWithTransitions(clipPaths, durations, mergedPath, fps);
+    const concatFilePath = path.join(workDir, "files.txt");
+
+    const content = clipPaths.map(p => `file '${p}'`).join("\n");
+    
+    await fs.writeFile(concatFilePath, content);
+    
+    await runCommand("ffmpeg", [
+      "-y",
+      "-f", "concat",
+      "-safe", "0",
+      "-i", concatFilePath,
+      "-c", "copy",
+      mergedPath
+    ]);
 
     const finalPath = path.join(workDir, "final.mp4");
 
