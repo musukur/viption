@@ -74,26 +74,22 @@ function normalizeDurations(durations, totalSec) {
 /* ===== CINEMATIC MOTION ===== */
 /* ============================= */
 
-function getMotionFilter(index, width, height, durationSec) {
+function getMotionFilter(index, width, height) {
   const variant = index % 4;
 
   switch (variant) {
 
     case 0:
-      // slow zoom-like effect via crop
       return `crop=${width}:${height}:(iw-${width})/2:(ih-${height})/2`;
 
     case 1:
-      // left → right pan
-      return `crop=${width}:${height}:(t/${durationSec})*(iw-${width}):(ih-${height})/2`;
+      return `crop=${width}:${height}:0:(ih-${height})/2`;
 
     case 2:
-      // right → left pan
-      return `crop=${width}:${height}:(iw-${width})-(t/${durationSec})*(iw-${width}):(ih-${height})/2`;
+      return `crop=${width}:${height}:(iw-${width}):(ih-${height})/2`;
 
     default:
-      // slight vertical movement
-      return `crop=${width}:${height}:(iw-${width})/2:(t/${durationSec})*(ih-${height})`;
+      return `crop=${width}:${height}:(iw-${width})/2:0`;
   }
 }
 
@@ -111,10 +107,10 @@ async function createImageClip({
   fps = 25
 }) {
 
-  const motion = getMotionFilter(index, width, height, durationSec);
+  const motion = getMotionFilter(index, width, height);
 
   const vf = [
-    `scale=${width * 1.3}:${height * 1.3}`,   // zoom effect
+    `scale=${width * 1.3}:${height * 1.3}`, // zoom effect
     motion,
     `fps=${fps}`,
     `format=yuv420p`
@@ -125,7 +121,7 @@ async function createImageClip({
     "-loop", "1",
     "-i", imagePath,
 
-    "-t", String(durationSec),   // ✅ IMPORTANT (bring back -t)
+    "-t", String(durationSec),   // ✅ ONLY duration control
 
     "-vf", vf,
 
