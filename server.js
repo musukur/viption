@@ -114,7 +114,9 @@ async function createImageClip({
 
   const vf = [
     `scale=${width * 1.2}:-1`,
-    motion,
+    `fps=${fps}`,                  // IMPORTANT
+    motion,                        // zoompan
+    `setpts=PTS-STARTPTS`,         // IMPORTANT FIX
     `format=yuv420p`
   ].join(",");
 
@@ -123,15 +125,10 @@ async function createImageClip({
     "-loop", "1",
     "-i", imagePath,
 
-    // ❗ REMOVE -t ❌
-    // "-t", String(durationSec),
-
     "-vf", vf,
 
-    // ❗ IMPORTANT
-    "-frames:v", String(frames),
+    "-frames:v", String(frames),   // IMPORTANT
 
-    "-r", String(fps),
     "-c:v", "libx264",
     "-preset", "veryfast",
     "-crf", "28",
