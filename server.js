@@ -110,7 +110,7 @@ async function createImageClip({
   const motion = getMotionFilter(index, width, height);
 
   const vf = [
-    `scale=${width * 1.3}:${height * 1.3}`, // zoom effect
+    `scale=${width}:${height}`, // zoom effect
     motion,
     `fps=${fps}`,
     `format=yuv420p`
