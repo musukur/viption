@@ -15,29 +15,45 @@ app.use(express.json({ limit: "20mb" }));
 const TMP_DIR = path.join(__dirname, "tmp");
 await fs.ensureDir(TMP_DIR);
 
-/* ============================= */
-/* ===== COMMON UTIL ========= */
-/* ============================= */
-
 function runCommand(command, args) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args);
+    const child = spawn(command, args, {
+      stdio: ["ignore", "pipe", "pipe"]
+    });
 
+    let stdout = "";
     let stderr = "";
+
+    child.stdout.on("data", (data) => {
+      stdout += data.toString();
+    });
 
     child.stderr.on("data", (data) => {
       stderr += data.toString();
     });
 
-    child.on("close", (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(stderr));
+    child.on("close", (code, signal) => {
+      if (code === 0) {
+        resolve({ stdout, stderr });
+      } else {
+        reject(
+          new Error(
+            `${command} failed with code ${code} signal ${signal}\n${stderr}`
+          )
+        );
+      }
     });
+
+    child.on("error", (err) => reject(err));
   });
 }
 
 async function downloadFile(url, outputPath) {
-  const response = await axios.get(url, { responseType: "stream" });
+  const response = await axios.get(url, {
+    responseType: "stream",
+    timeout: 120000,
+    maxRedirects: 5
+  });
 
   await new Promise((resolve, reject) => {
     const writer = fs.createWriteStream(outputPath);
@@ -47,55 +63,108 @@ async function downloadFile(url, outputPath) {
   });
 }
 
-/* ============================= */
-/* ===== DURATION LOGIC ===== */
-/* ============================= */
-
-function distributeDurations(totalDurationMs, count) {
-  const totalSec = totalDurationMs / 1000;
-
-  if (count === 1) return [totalSec];
-
-  const first = Math.min(2.5, totalSec * 0.2);
-  const remaining = totalSec - first;
-
-  const rest = Array(count - 1).fill(remaining / (count - 1));
-
-  return [first, ...rest];
-}
-
-function normalizeDurations(durations, totalSec) {
-  const sum = durations.reduce((a, b) => a + b, 0);
-  const factor = totalSec / sum;
-  return durations.map(d => d * factor);
-}
-
-/* ============================= */
-/* ===== CINEMATIC MOTION ===== */
-/* ============================= */
-
-function getMotionFilter(index, width, height) {
-  const variant = index % 4;
-
-  switch (variant) {
-
-    case 0:
-      return `crop=${width}:${height}:(iw-${width})/2:(ih-${height})/2`;
-
-    case 1:
-      return `crop=${width}:${height}:0:(ih-${height})/2`;
-
-    case 2:
-      return `crop=${width}:${height}:(iw-${width}):(ih-${height})/2`;
-
+function mapPosition(position) {
+  switch (position) {
+    case "top":
+      return 8;
+    case "center":
+      return 5;
+    case "bottom":
     default:
-      return `crop=${width}:${height}:(iw-${width})/2:0`;
+      return 2;
   }
 }
 
-/* ============================= */
-/* ===== IMAGE -> VIDEO ===== */
-/* ============================= */
+function hexToAssColor(hex) {
+  const clean = (hex || "#FFFFFF").replace("#", "");
+  if (!/^[0-9A-Fa-f]{6}$/.test(clean)) {
+    throw new Error(`Invalid color value: ${hex}`);
+  }
+
+  const r = clean.substring(0, 2);
+  const g = clean.substring(2, 4);
+  const b = clean.substring(4, 6);
+
+  return `&H00${b}${g}${r}`.toUpperCase();
+}
+
+function buildStyleLine(inputStyle = {}) {
+  const style = {
+    font: "Arial",
+    fontSize: 32,
+    bold: true,
+    textColor: "#FFFFFF",
+    outlineColor: "#000000",
+    outlineWidth: 4,
+    shadow: 2,
+    position: "bottom",
+    marginBottom: 160,
+    ...inputStyle
+  };
+
+  const primaryColour = hexToAssColor(style.textColor);
+  const outlineColour = hexToAssColor(style.outlineColor);
+  const boldValue = style.bold ? -1 : 0;
+  const alignment = mapPosition(style.position);
+
+  return `Style: Default,${style.font},${style.fontSize},${primaryColour},&H0000FFFF,${outlineColour},&H64000000,${boldValue},0,0,0,100,100,0,0,1,${style.outlineWidth},${style.shadow},${alignment},40,40,${style.marginBottom},1`;
+}
+
+function validateRenderRequest(body) {
+  const { videoUrl, assContent, style } = body;
+
+  if (!videoUrl || typeof videoUrl !== "string") {
+    throw new Error("videoUrl is required and must be a string");
+  }
+
+  if (!assContent || typeof assContent !== "string") {
+    throw new Error("assContent is required and must be a string");
+  }
+
+  if (!assContent.includes("Style: Default,")) {
+    throw new Error("assContent must contain 'Style: Default,'");
+  }
+
+  if (!assContent.includes("[Events]")) {
+    throw new Error("assContent must contain '[Events]'");
+  }
+
+  if (style !== undefined && (typeof style !== "object" || Array.isArray(style) || style === null)) {
+    throw new Error("style must be an object");
+  }
+
+  if (style?.position && !["top", "center", "bottom"].includes(style.position)) {
+    throw new Error("style.position must be one of: top, center, bottom");
+  }
+}
+
+function getMotionFilter(index, width, height, fps, durationSec, scaleSize) {
+  const frames = Math.max(1, Math.round(durationSec * fps));
+  const variant = index % 4;
+  const isHorizontal = width > height;
+
+  const yExpr = isHorizontal
+    ? "ih/3-(ih/zoom/3)"
+    : "ih/2-(ih/zoom/2)";
+  
+  switch (variant) {
+    case 0:
+      // stronger center push-in
+      return `scale=${scaleSize}:-1,zoompan=z='min(zoom+0.0016,1.5)':x='iw/2-(iw/zoom/2)':y=${yExpr}:d=${frames}:s=${width}x${height}:fps=${fps}`;
+
+    case 1:
+      // stronger left-focus push-in
+      return `scale=${scaleSize}:-1,zoompan=z='min(zoom+0.0016,1.5)':x='0':y=${yExpr}:d=${frames}:s=${width}x${height}:fps=${fps}`;
+
+    case 2:
+      // stronger right-focus push-in
+      return `scale=${scaleSize}:-1,zoompan=z='min(zoom+0.0016,1.5)':x='iw-iw/zoom':y=${yExpr}:d=${frames}:s=${width}x${height}:fps=${fps}`;
+
+    default:
+      // noticeable zoom-out
+      return `scale=${scaleSize}:-1,zoompan=z='if(lte(on,1),1.5,max(1.0,zoom-0.0016))':x='iw/2-(iw/zoom/2)':y=${yExpr}:d=${frames}:s=${width}x${height}:fps=${fps}`;
+  }
+}
 
 async function createImageClip({
   imagePath,
@@ -104,124 +173,155 @@ async function createImageClip({
   index,
   width,
   height,
-  fps = 25
+  fps = 25,
+  scaleSize
 }) {
+  const frames = Math.max(1, Math.round(durationSec * fps));
 
-  const motion = getMotionFilter(index, width, height);
+  const motion = getMotionFilter(
+    index,
+    width,
+    height,
+    fps,
+    durationSec,
+    scaleSize
+  );
 
-  const vf = [
-    `scale=${width}:${height}`, // zoom effect
-    motion,
-    `fps=${fps}`,
-    `format=yuv420p`
-  ].join(",");
+  const effects =
+    "eq=contrast=1.08:saturation=1.15:brightness=0.02,unsharp=5:5:0.6:3:3:0.3";
+
+  const isVertical = height > width;
+
+  const baseFit = isVertical
+    ? `scale=-1:${height}`
+    : `scale=${width}:-1`;
+
+  const vf = `${baseFit},${motion},${effects},format=yuv420p`;
 
   await runCommand("ffmpeg", [
     "-y",
     "-loop", "1",
     "-i", imagePath,
-
-    "-t", String(durationSec),   // ✅ ONLY duration control
-
     "-vf", vf,
-
+    "-frames:v", String(frames),
     "-c:v", "libx264",
-    "-preset", "veryfast",
+    "-preset", "ultrafast",
     "-crf", "28",
-
+    "-threads", "1",
     clipPath
   ]);
 }
 
-/* ============================= */
-/* ===== TRANSITION MERGE ===== */
-/* ============================= */
+function getAspectConfig(aspectRatio = "9:16") {
+  switch (aspectRatio) {
+    case "16:9":
+      return {
+        width: 1920,
+        height: 1080,
+        scale: 2560
+      };
 
-async function mergeWithTransitions(clips, durations, outputPath, fps) {
-  const inputs = [];
-  clips.forEach(c => inputs.push("-i", c));
-
-  let filter = "";
-  let last = "[0:v]";
-  let cumulative = 0;
-
-  for (let i = 1; i < clips.length; i++) {
-    const t = 0.6;
-    cumulative += durations[i - 1];
-    const offset = cumulative - t;
-
-    filter += `${last}[${i}:v]xfade=transition=fade:duration=${t}:offset=${offset}[v${i}];`;
-    last = `[v${i}]`;
+    case "9:16":
+    default:
+      return {
+        width: 1080,
+        height: 1920,
+        scale: 3400
+      };
   }
-
-  await runCommand("ffmpeg", [
-    "-y",
-    ...inputs,
-    "-filter_complex", filter,
-    "-map", last,
-    "-r", String(fps),
-    "-c:v", "libx264",
-    "-crf", "20",
-    outputPath
-  ]);
 }
 
-/* ============================= */
-/* ===== VIDEO ENDPOINT ===== */
-/* ============================= */
+function applyStyleToAss(assContent, style = {}) {
+  const newStyleLine = buildStyleLine(style);
+
+  // normalize line endings first
+  const normalized = assContent.replace(/\r\n/g, "\n");
+
+  // try replacing any Style: Default line
+  if (/^Style:\s*Default,/m.test(normalized)) {
+    return normalized.replace(/^Style:\s*Default,.*$/m, newStyleLine);
+  }
+
+  // fallback: insert style line after the V4+ Styles format line
+  if (/^\[V4\+ Styles\]$/m.test(normalized)) {
+    return normalized.replace(
+      /(\[V4\+ Styles\]\nFormat:.*\n)/m,
+      `$1${newStyleLine}\n`
+    );
+  }
+
+  throw new Error("Could not find ASS style section");
+}
 
 app.post("/render/video", async (req, res) => {
   const jobId = uuidv4();
   const workDir = path.join(TMP_DIR, jobId);
 
   try {
-    const { audioUrl, totalDurationMs, images } = req.body;
+    // ✅ SINGLE destructuring (fixed)
+    const { audioUrl, totalDurationMs, images, aspectRatio } = req.body;
 
-    if (!audioUrl || !totalDurationMs || !images?.length) {
-      throw new Error("Invalid input");
+    if (!audioUrl || typeof audioUrl !== "string") {
+      throw new Error("audioUrl is required and must be a string");
+    }
+
+    if (!totalDurationMs || typeof totalDurationMs !== "number") {
+      throw new Error("totalDurationMs is required and must be a number");
+    }
+
+    if (!Array.isArray(images) || images.length === 0) {
+      throw new Error("images is required and must be a non-empty array");
     }
 
     await fs.ensureDir(workDir);
 
-    const width = 1920;
-    const height = 1080;
+    // ✅ aspect config
+    const config = getAspectConfig(aspectRatio);
+
+    const width = config.width;
+    const height = config.height;
     const fps = 25;
 
     const audioPath = path.join(workDir, "audio.mp3");
     await downloadFile(audioUrl, audioPath);
 
-    let durations = distributeDurations(totalDurationMs, images.length);
-    durations = normalizeDurations(durations, totalDurationMs / 1000);
-
     const clipPaths = [];
 
     for (let i = 0; i < images.length; i++) {
-      const imagePath = path.join(workDir, `img_${i}.jpg`);
+      const image = images[i];
+
+      if (!image.url || typeof image.url !== "string") {
+        throw new Error(`images[${i}].url is required`);
+      }
+
+      if (!image.duration || typeof image.duration !== "number") {
+        throw new Error(`images[${i}].duration is required`);
+      }
+
+      const imagePath = path.join(workDir, `image_${i}.jpg`);
       const clipPath = path.join(workDir, `clip_${i}.mp4`);
 
-      await downloadFile(images[i].url, imagePath);
+      await downloadFile(image.url, imagePath);
 
       await createImageClip({
         imagePath,
         clipPath,
-        durationSec: durations[i],
+        durationSec: image.duration / 1000,
         index: i,
         width,
         height,
-        fps
+        fps,
+        scaleSize: config.scale
       });
 
       clipPaths.push(clipPath);
     }
 
-    const mergedPath = path.join(workDir, "merged.mp4");
-
     const concatFilePath = path.join(workDir, "files.txt");
+    const concatContent = clipPaths.map((clip) => `file '${clip}'`).join("\n");
+    await fs.writeFile(concatFilePath, concatContent, "utf8");
 
-    const content = clipPaths.map(p => `file '${p}'`).join("\n");
-    
-    await fs.writeFile(concatFilePath, content);
-    
+    const mergedPath = path.join(workDir, "merged.mp4");
     await runCommand("ffmpeg", [
       "-y",
       "-f", "concat",
@@ -232,76 +332,106 @@ app.post("/render/video", async (req, res) => {
     ]);
 
     const finalPath = path.join(workDir, "final.mp4");
-
     await runCommand("ffmpeg", [
       "-y",
       "-i", mergedPath,
       "-i", audioPath,
       "-c:v", "copy",
       "-c:a", "aac",
+      "-b:a", "128k",
       "-shortest",
+      "-threads", "1",
       finalPath
     ]);
 
     res.setHeader("Content-Type", "video/mp4");
-    fs.createReadStream(finalPath).pipe(res);
+    res.setHeader("Content-Disposition", 'inline; filename="video.mp4"');
+
+    const stream = fs.createReadStream(finalPath);
+    stream.pipe(res);
+
+    stream.on("close", async () => {
+      await fs.remove(workDir).catch(() => {});
+    });
 
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
+    await fs.remove(workDir).catch(() => {});
+
+    res.status(500).json({
+      success: false,
+      error: "Video render failed",
+      details: err.message
+    });
   }
 });
-
-/* ============================= */
-/* ===== HEALTH ===== */
-/* ============================= */
 
 app.get("/health", async (_req, res) => {
   try {
-    await runCommand("ffmpeg", ["-version"]);
-    res.json({ status: "ok" });
-  } catch {
-    res.status(500).json({ status: "ffmpeg not working" });
+    const result = await runCommand("ffmpeg", ["-version"]);
+
+    res.json({
+      status: "ok",
+      message: "API is working",
+      ffmpeg: result.stdout.split("\n")[0]
+    });
+  } catch (err) {
+    res.status(500).json({
+      status: "error",
+      message: "FFmpeg not available",
+      details: err.message
+    });
   }
 });
-
-/* ============================= */
-/* ===== ASS SUBTITLE (UNCHANGED) */
-/* ============================= */
 
 app.post("/render-ass", async (req, res) => {
   const jobId = uuidv4();
   const workDir = path.join(TMP_DIR, jobId);
+  const inputVideoPath = path.join(workDir, "input.mp4");
+  const subtitlePath = path.join(workDir, "subtitles.ass");
+  const outputVideoPath = path.join(workDir, "output.mp4");
 
   try {
-    const { videoUrl, assContent } = req.body;
+    validateRenderRequest(req.body);
 
-    const input = path.join(workDir, "input.mp4");
-    const output = path.join(workDir, "output.mp4");
-    const subtitle = path.join(workDir, "sub.ass");
+    const { videoUrl, assContent, style } = req.body;
 
     await fs.ensureDir(workDir);
 
-    await downloadFile(videoUrl, input);
-    await fs.writeFile(subtitle, assContent);
+    const updatedAssContent = applyStyleToAss(assContent, style || {});
+    await fs.writeFile(subtitlePath, updatedAssContent, "utf8");
+
+    await downloadFile(videoUrl, inputVideoPath);
 
     await runCommand("ffmpeg", [
       "-y",
-      "-i", input,
-      "-vf", `ass=${subtitle}`,
-      "-c:a", "copy",
-      output
+      "-i",
+      inputVideoPath,
+      "-vf",
+      `ass=${subtitlePath}`,
+      "-c:a",
+      "copy",
+      outputVideoPath
     ]);
 
     res.setHeader("Content-Type", "video/mp4");
-    fs.createReadStream(output).pipe(res);
+    res.setHeader("Content-Disposition", 'inline; filename="output.mp4"');
 
+    const stream = fs.createReadStream(outputVideoPath);
+    stream.pipe(res);
+
+    stream.on("close", async () => {
+      await fs.remove(workDir).catch(() => {});
+    });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    await fs.remove(workDir).catch(() => {});
+
+    res.status(500).json({
+      success: false,
+      error: "Video render failed",
+      details: err.message
+    });
   }
 });
-
-/* ============================= */
 
 const PORT = process.env.PORT || 3000;
 
